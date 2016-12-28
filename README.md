@@ -8,7 +8,20 @@ Currently it includes:
 
 
 ## doPandoc
-This requires a specific structure of the source folders:
+### Installation
+This is a python script, hence provide for a python-3 environment to run this in a shell. Furthermore, it supports git, hence make sure git is installed as well.
+
+### Operation
+Operate this script from a shell:
+
+1. Open a shell, `cd` to the folder that contains your Scrivener project (i.e., contains your `myProject.scriv` folder) and run\\
+1. `python doPandoc.py` \\
+or make your windows environment to understand the `.py` extension and run\\
+1. `doPandoc`
+
+Without any arguments, this command will return a default `usage: ...` instruction. For more information, run `doPandoc -h`.
+
+Using this script requires a specific structure of the source folders:
 
 * `templates` contains all the templates that your project can make use of for its visual appearance;
     * The `templates/tex/latex` directory is where LaTeX support files go (see Fletcher Penney's [peg-multimarkdown-latex-support] (https://github.com/fletcher/peg-multimarkdown-latex-support) project for a superset of what's bundled).
