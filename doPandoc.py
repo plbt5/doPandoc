@@ -52,6 +52,42 @@ class cd:
     def __exit__(self, etype, value, traceback):
         os.chdir(self.savedPath)
 
+def getGitUrl():
+	from urllib.parse import urlparse
+	# Ask the user for her Git server url
+	# Return: the url of the git-server, or None if she wants to keep git local
+	gitUrls = []
+	gitUrls.append("http://gitlab.servicelab.org/plbt5/")
+	gitUrls.append("https://git.ics.ele.tue.nl/pbrandt/")
+	gitUrls.append("https://github.com/plbt5/")
+	gitUrls.append(".... other (specify)")
+	
+	print("You don't have configured a git server yet. Select your git of choice:")
+	for i, anUrl in enumerate(gitUrls):
+		print("\t{}: {}".format(str(i), anUrl))
+	my_url = ""
+	while my_url == "":
+		choice = input("Enter your number of choice, type your own git url, or <return> for None (i.e., keep git local): ")
+		if len(choice) == 1 and (int(choice) >=0 and int(choice) < len(gitUrls)):
+			my_url = gitUrls[int(choice)]
+			print("Applying git server: {}".format(my_url))
+		elif len(choice) > 7:
+			u = urlparse(choice)
+			if not u.scheme in ['http', 'https']:
+				print("Can only accept 'http' or 'https' schemas")
+			elif len(u.netloc.split('.')) < 1:
+				print("Please use fully qualified network location (www.host.country_code)")
+			else: 
+				my_url = choice
+				print("Applying git server: {}".format(my_url))
+		elif len(choice) == 0: 
+			my_url = None
+			print("Applying local git only")
+		else: 
+			print("Can only accept a number, an url, or a single enter.")
+	return my_url
+
+		
 def gitCommit(project=None, msg=None, major=None, minor=None):
 	# Open shell and 
 	# * Check for untracked textual assets and stage them
@@ -61,51 +97,80 @@ def gitCommit(project=None, msg=None, major=None, minor=None):
 	assert project, "gitCommit(): Require project name, got None"
 	assert msg, "gitCommit(): Require useful message, got None"
 	
+	remote_url = None
+	retain_current = False
+	
+	# Check use of git, if not, initialise git
+	try:
+		result = subprocess.run(args=['git', 'status'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+		result = subprocess.run(args=['git', 'remote', '-v'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+		# A successful 'git remote -v' returns either (i) , or (ii) several paires of lines, formatted as <name> <url> [(fetch) | (push)] 
+		if result.returncode == 0 and len(result.stdout) > 0:		
+			remote_url = result.stdout.splitlines()[0].split()[1]
+	except subprocess.CalledProcessError as e:
+		assert "Not a git repository" in str(e.stderr), "gitCommit: unknown exception thrown, quitting ({})".format(str(e.stderr))
+		print("You are not using git. Initializing git ...")
+		try:
+			result = subprocess.run(args=['git', 'init'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+			major = minor = 0
+			msg = "Project initiated in git, first commit"
+			remote_url = getGitUrl()
+			if remote_url:
+				result = subprocess.run(args=['git', 'remote', 'add', 'origin', remote_url+'/'+project], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+				print("git result: {}".format(result))
+		except subprocess.CalledProcessError as e:
+			print("Error in 'git init' / 'git remote add origin': ({}) - git not used, hence no versioning".format(e.stdout))
+			return
 	# Stage (add) the changes to git
 	try:
 		scrivdir = project+'.scriv/Files/Docs/*.rtf'
-		result = subprocess.run(args=['git', 'add', scrivdir], stdout=subprocess.PIPE, stderr=None, shell=True, check=True)
-		result = subprocess.run(args=['git', 'add', '-u'], stdout=subprocess.PIPE, stderr=None, shell=True, check=True)
+		result = subprocess.run(args=['git', 'add', scrivdir], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+		result = subprocess.run(args=['git', 'add', '-u'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 	except subprocess.CalledProcessError as e: 
-		print("git staging error: ({}) - maintaining current version ({}).".format(e.stdout, getVersion(True)))
-		# Following is hack to communicate to retain current version, i.e., do not tag the head
-		major = None
+		print("git staging error: ({}) - maintaining current version ({}).".format(e.stderr, getVersion(True)))
+		retain_current = True
 		
 	# Commit the changes to head, use commit message
 	try:
-		result = subprocess.run(args=['git', 'commit', '-m"'+msg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=None, shell=True, timeout=None, check=True)
+		result = subprocess.run(args=['git', 'commit', '-m"'+msg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True)
 	except subprocess.CalledProcessError as e: 
+		retain_current = True
 		if str(e.stdout).find("Your branch is up-to-date with", 0, 60):
-			print("Branch is up-tp-date, hence maintaining current version ({}).".format(getVersion(True)))
+			print("Branch is up-to-date, hence maintaining current version ({}).".format(getVersion(True)))
 		else:
-			print("git local commit error: ({})\nMaintaining current version ({}).".format(str(e.stdout), getVersion(True)))
-		# Following is hack to communicate to retain the current version, i.e., do not tag the head
-		minor = None
+			print("git local commit error: ({})\nMaintaining current version ({}).".format(str(e.stderr), getVersion(True)))
 		
 	# On use of versioning, tag Head with version
-	if major and minor:
+	if not retain_current:
 		tagGitHead(major, minor)
-		
-	# Push the local git commits to the remote repository
-	try:
-		result = subprocess.run(args=['git', 'push', '--follow-tags'], stdout=subprocess.PIPE, stderr=None, shell=True, check=True)
-	except subprocess.CalledProcessError as e:
-		# Push or commit returned error: GIT CANNOT ACCESS THE REMOTE REPOSITORY, 
-		# assume (i) we are offline, and (ii) synchronisation will happen next time
-		print("Warning: git commit/push error ({}). Not connected? Try next time".format(e.stdout))
+
+	if remote_url:
+		# Push the local git commits to the remote repository
+		try:
+			result = subprocess.run(args=['git', 'push', '--follow-tags'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+		except subprocess.CalledProcessError as e:
+			# Push or commit returned error: GIT CANNOT ACCESS THE REMOTE REPOSITORY, 
+			# assume (i) we are offline, and (ii) synchronisation will happen next time
+			print("Warning: git commit/push error ({}).\nNot connected? Try next time".format(e.stderr))
 
 
 def getVersion(concat = False):
 	# Establish tag (=version), hash and commits on top of current version
 	# return either concatenated version; or the three version parts major, minor, commits; or None if nothing found 
 	try:
-		root = subprocess.check_output(['git', 'describe', '--long']).decode('ascii').rstrip()	
+#		root = subprocess.check_output(['git', 'describe', '--tags', '--long', '--always']).decode('ascii').rstrip()	
+		root = str(subprocess.run(args=['git', 'describe', '--tags', '--long', '--always'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True).stdout)
 	except subprocess.CalledProcessError as e: 
 		# Apparently git is not used
-		print("git not used ({})".format(e.stdout))
+		print("git not used ({})".format(e.stderr))
 		return None
-	tag, commits, hash = root.split('-')
-	major, minor = tag[1:].split('.')
+	# Check whether our format is being used, i.e., x.y-z. If not, git is used but without tags
+	if '-' in root.stdout:
+		tag, commits, hash = root.split('-')
+		major, minor = tag[1:].split('.')
+	else: 
+		tag = 'v0.0'
+		commits = str(0)
 	if concat:
 		return tag + '-' + commits
 	else:
@@ -114,6 +179,8 @@ def getVersion(concat = False):
 def incrementVersion(level=None, concat = False):
 	# Just return the incremented version, based on the requested level
 	major, minor, commits = getVersion()
+	if not commits:		# Apparently no git usage yet
+		return None
 	if level:
 		if level == 'minor': 
 			minor+=1
@@ -135,12 +202,13 @@ def incrementVersion(level=None, concat = False):
 
 def tagGitHead(major, minor):
 	# Open shell and tag the current head
+	print("tagging HEAD with v{}.{}".format(str(major),str(minor)))
 	tag = 'v' + str(major) + '.' + str(minor)
 	tagMsg = 'Version ' + tag
 	try:
-		result = subprocess.run(args=['git', 'tag', '-a', tag, '-m "'+tagMsg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=None, shell=True, timeout=None, check=True)
+		result = subprocess.run(args=['git', 'tag', '-a', tag, '-m "'+tagMsg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True)
 	except subprocess.CalledProcessError as e:
-		print("git tagging error: {}".format(str(e.stdout)))
+		print("git tagging error: {}".format(str(e.stderr)))
 
 
 
@@ -158,6 +226,7 @@ default['md']   = '.mmd'
 default['mmd']  = '.mmd'
 default['-d']   = 'templates'
 default['-l']   = None
+default['-g']   = None
 default['-t']   = 'pandoc-docstyle'
 default['-s']   = 'src'
 default['-r']   = 'results'
@@ -209,7 +278,7 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument('source', help='the name of the source file; leaving out the extension assumes .mmd')
 parser.add_argument('format', choices=['doc', 'docx', 'tex', 'pdf'], help='the target format: [doc | docx | tex | pdf]')
-parser.add_argument('-g', '--git', help='(optional) use git-versioning to commit the current text, tagged as new minor version. The text following this argument is considered the commit message (try to scale it to 50 chars). Only useful when you checked out your scrivener project from git', default=None)
+parser.add_argument('-g', '--git', help='(optional) use git-versioning to commit the current text, tagged as new minor version. The text following this argument is considered the commit message (try to scale it to 50 chars). Only useful when you checked out your scrivener project from git', default=default['-g'])
 parser.add_argument('-l', '--level', choices=['none', 'minor', 'major'], help='(optional) the version level that will be incremented (requires option -g <msg>, unless "-l")', default=default['-l'])
 parser.add_argument('-t', '--template', help='(optional) your style template file; leaving out the extension implies compatibility with specified target format ', default=default['-t'])
 parser.add_argument('-d', '--dDir', help='(optional) the root directory (relative to your project dir) holding the style template file ', default=default['-d'])
@@ -364,20 +433,24 @@ pArgs.append(src_filename)
 ###########
 
 with cd(baseDir):
-    print ('changed dir to: '+ os.getcwd())
-    print ('Running \n{}\n'.format(str(pArgs)))
-    
-    rc = subprocess.call(pArgs)                 # Do the actual pandoc operation and safe its return value
+	print ('changed dir to: '+ os.getcwd())
+	print ('Running \n{}\n'.format(str(pArgs)))
 
-    if (rc == 0):                               # When pandoc didn't complain, we can stage, commit and sync the docs to git, and finally open the resulting file
+	rc = subprocess.call(pArgs)                 # Do the actual pandoc operation and safe its return value
+
+	if (rc == 0):                               # When pandoc didn't complain, we can stage, commit and sync the docs to git, and finally open the resulting file
 		# TODO: INCORRECT CODING: This is not completely correct. In the event git establishes that current branch is up-to-date, it will not increase the version number (only hash update). 
 		# However, the document has been generated with the newly calculated version number already. Therefore, we need to modify the process and first commit, then pandoc, and, if pandoc
 		# complains, replace the local changes (i.e., checkout previous version)
-        major, minor = version[1:].split('-')[0].split('.')
-        gitCommit(project=project, msg=gitMessage, major=major, minor=minor)
-        os.startfile(os.path.join(targetDir,targetFile), 'open')
-    else: print("\n>>>> ERROR: pandoc returned with {}".format(rc))
-		
+		if version and not version == 'v0.0-0': 
+			major, minor = version[1:].split('-')[0].split('.')
+		else:
+			major = minor = None
+		gitCommit(project=project, msg=gitMessage, major=major, minor=minor)
+		os.startfile(os.path.join(targetDir,targetFile), 'open')
+	else: print("\n>>>> ERROR: pandoc returned with {}".format(rc))
+	
+
 
 print ('Done!\n')
 

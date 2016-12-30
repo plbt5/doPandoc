@@ -1,0 +1,3 @@
+Note that this is a development folder only, contained in a git environment (http://gitlab.servicelab.org/plbt5/python-scripts.git).
+
+Any modifications to this script will not result in a different behaviour, since the Windows shell path will point to the version that is available at "C:\Program Files (x86)\scripts". Hence copy the new version to that folder!!
