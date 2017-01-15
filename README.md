@@ -8,8 +8,15 @@ Currently it includes:
 
 
 ## doPandoc
+Pandoc is a very convenient text format transformation tool that can mediate between several in- and output formats for your documents. Refer to http://pandoc.org/ for its ever growing details. 
+Git is a very convenient version control system, that can be effectively used for documents as well, especially when you develop multiple parts of it in parallel and have it reviewed in parallel as well (branching and merging).
+Both tools have complicated command line options; doPandoc combines them and provide for several document scenarios with a relative simple command line environment. 
+
 ### Installation
-This is a python script, hence provide for a python-3 environment to run this in a shell. Furthermore, it supports git, hence make sure git is installed as well.
+This is a python script, hence provide for a python-3 environment to run this in a shell. Furthermore, it optionally supports git, hence make sure git is installed if you want to use it.
+
+### Features
+A combination of (i) processing your multimarkdown through pandoc to an output of choice; (ii) using git for version control; (iii) using git for branch control. (iii) implies (ii). 
 
 ### Operation
 Operate this script from a shell:
@@ -24,6 +31,8 @@ Without any arguments, this command will return a default `usage: ...` instructi
 Using this script requires a specific structure of the source folders:
 
 * `templates` contains all the templates that your project can make use of for its visual appearance;
+    * Place your document template here; either for latex (<myTemplate>.tex) or Word (<myTemplate>.docx). As opposed to the former, in case of a Word template, only the formatting of the document is used, not its contents.
+	* Place your bibliography style sheet here (<myCSL>.csl). This is for LaTeX oriented use only.
     * The `templates/tex/latex` directory is where LaTeX support files go (see Fletcher Penney's [peg-multimarkdown-latex-support] (https://github.com/fletcher/peg-multimarkdown-latex-support) project for a superset of what's bundled).
 * `src` contains all files that are to be included in your resulting report:
     * `bib` can be used to store your bibliography if you maintain an external one. This is LaTeX oriented, hence consider a `.bib` file.

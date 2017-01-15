@@ -66,7 +66,7 @@ class Git:
 			self.init()
 	
 	def init(self):
-		print("Initializing local git ...")
+		print("* ** Initializing local git ...")
 		try:
 			result = subprocess.run(args=['git', 'init'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 		except subprocess.CalledProcessError as e:
@@ -104,33 +104,33 @@ class Git:
 		# Check that there is no remote git server already
 		my_url = self.getUrl()
 		if my_url: return my_url
-		print("Consider to configure a remote server for this local git.")
+		print("* ** Consider to configure a remote server for this local git.")
 		choice = ''
 		while not choice in ['s', 'S', 'c', 'C']:
 			choice = input("Remote Git Server: already [c]reated your project remotely, or [s]kip configuring a remote server for this local git? [s]") or "s"
 		if choice.lower() == 's': return None
 		for i, anUrl in enumerate(gitUrls):
-			print("\t{}: {}".format(str(i), anUrl))
+			print("* ** \t{}: {}".format(str(i), anUrl))
 		my_url = ""
 		while my_url == "":
 			choice = input("Enter your number of choice, or <return> for None (i.e., keep git local): ")
 			if len(choice) == 1 and int(choice) >=0 and int(choice) < len(gitUrls)-1:
 				my_url = gitUrls[int(choice)]
-				print("Applying git server: {}".format(my_url))
+				print("* ** Applying git server: {}".format(my_url))
 			elif int(choice) == len(gitUrls):
 				url_spec = urlparse(input("Enter the (fully qualified domain name) url of the git server, including your account: "))
 				if not url_spec.scheme in ['http', 'https']:
-					print("Can only accept 'http' or 'https' schemas")
+					print("* ** Can only accept 'http' or 'https' schemas")
 				elif len(url_spec.netloc.split('.')) < 1:
-					print("Please use fully qualified network location (www.host.country_code)")
+					print("* ** Please use fully qualified network location (www.host.country_code)")
 				else: 
 					my_url = url_spec.geturl()
-					print("Applying git server: {}".format(my_url))
+					print("* ** Applying git server: {}".format(my_url))
 			elif len(choice) == 0: 
 				my_url = None
-				print("Applying local git only")
+				print("* ** Applying local git only")
 			else: 
-				print("Can only accept a number, or a single enter.")
+				print("* ** Can only accept a number, or a single enter.")
 		self.remote_url = my_url
 		return my_url
 			
@@ -151,7 +151,7 @@ class Git:
 			result = subprocess.run(args=['git', 'add', 'templates/*'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			result = subprocess.run(args=['git', 'add', '-u'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 		except subprocess.CalledProcessError as e: 
-			print("git staging error: ({}) - maintaining current version ({}).".format(e.stderr, self.version(True)))
+			print("* git staging error: ({}) - maintaining current version ({}).".format(e.stderr, self.version(True)))
 			return
 			
 		# Commit the changes to head, use commit message
@@ -159,7 +159,7 @@ class Git:
 			result = subprocess.run(args=['git', 'commit', '-m"'+msg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True)
 		except subprocess.CalledProcessError as e: 
 			if str(e.stdout).find("Your branch is up-to-date with", 0, 60):
-				print("Branch is up-to-date, hence maintaining current version and same commit ({}).".format(self.version(True)))
+				print("* Branch is up-to-date, hence maintaining current version and same commit ({}).".format(self.version(True)))
 				return
 			else:
 				print("WARNING: git local commit error: ({})\nMaintaining current version and same commit ({}).".format(str(e.stderr), self.version(True)))
@@ -182,7 +182,7 @@ class Git:
 					result = subprocess.run(args=['git', 'remote', 'add', 'origin', remote_url+'/'+project], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 					result = subprocess.run(args=['git', 'push', '--set-upstream', 'origin',  'master'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 				except subprocess.CalledProcessError as e:
-					print("git: cannot add origin to remote, or add upstream (tracking) reference ({}) - remote git not used".format(e.stdout))
+					print("* git: cannot add origin to remote, or add upstream (tracking) reference ({}) - remote git not used".format(e.stdout))
 					# Clear the remote url reference and return false
 					self.remote_url = None
 					return False
@@ -191,18 +191,17 @@ class Git:
 				return False
 		# Here, a new remote server may just have been setup. Or, we already had a remote server. Then, do the actual push.
 		if self.getUrl():
-			print("pushing commit to server ({})".format(self.getUrl()))
+			print("* pushing commit to server ({})".format(self.getUrl()))
 			try:
 				result = subprocess.run(args=['git', 'push', '--follow-tags'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 				return True
 			except subprocess.CalledProcessError as e:
-				print("Warning: git push error ({}).\nNot connected? Try next time".format(e.stderr))
 				if str(e.stderr).find("fatal: The current branch '"+self.getBranches()['current']+"' has no upstream branch"):
 					result = subprocess.run(args=['git', 'push', '--set-upstream', 'origin', self.getBranches()['current']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 				else:
 					# Push returned error: GIT CANNOT ACCESS THE REMOTE REPOSITORY, aither because it has not yet been 
 					# assume (i) we are offline, and (ii) synchronisation will happen next time
-					print("Warning: git push error ({}).\nNot connected? Try next time".format(e.stderr))
+					print("* Warning: git push error ({}).\nNot connected? Try next time".format(e.stderr))
 		return False
 
 	def version(self, concat = False):
@@ -213,7 +212,7 @@ class Git:
 			root = subprocess.run(args=['git', 'describe', '--tags', '--long', '--always'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
 		except subprocess.CalledProcessError as e: 
 			# Apparently git is not used
-			print("git not used ({})".format(e.stderr))
+			print("* git not used ({})".format(e.stderr))
 			return None if concat else None, None, None
 		# Check whether our format is being used, i.e., x.y-z. If not, git is used but without our versioning scheme
 		if '-' in str(root):
@@ -224,7 +223,7 @@ class Git:
 			tag = 'v0.0'
 			major = minor = '0'
 			commits = subprocess.run(args=['git', 'rev-list', 'HEAD', '--count'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
-			print("init versioning ({})".format(self.tagHead(major, minor)))
+			print("* ** init versioning ({})".format(self.tagHead(major, minor)))
 		if concat:
 			return tag + '-' + commits
 		else:
@@ -241,12 +240,15 @@ class Git:
 			elif level == 'major':
 				major += 1
 				minor = 0
-			elif level == 'none': print("Retaining current version ({}) with new commit ({})".format(str(major) +'.'+ str(minor), str(commits)))
+			elif level == 'none': 
+				pass
+				# print("Retaining current version ({}) but increment current commit number ({})".format(str(major) +'.'+ str(minor), str(commits)))
 			else: 
-				print('Incorrect versioning request: can only support "none" (default), "minor" or "major", got "{}"'.format(level))
+				print('* Warning: Incorrect versioning request: can only support "none" (default), "minor" or "major", got "{}"'.format(level))
 				return None
 		else:
-			print("Retaining current version ({}) with new commit ({})".format(str(major) +'.'+ str(minor), str(commits)))
+			#print("Retaining current version ({}) but increment current commit number ({})".format(str(major) +'.'+ str(minor), str(commits)))
+			pass
 		if concat:
 			return 'v' + str(major) + '.' + str(minor) + '-' + str(commits)
 		else:
@@ -264,7 +266,7 @@ class Git:
 			if str(e.stdout).find("fatal: tag '"+tag+"' already exists", 0, 40):
 				return tag
 			else: 
-				print("git tagging error: {}".format(str(e.stderr)))
+				print("* Warning: got Git tagging error: {}".format(str(e.stderr)))
 				return None
 				
 	def getBranches(self):
@@ -276,10 +278,10 @@ class Git:
 			for br in result.splitlines():
 				if br[0] == '*': 
 					self.branches['current']=br[2:]
-					print("debug: * ({})".format(self.branches['current']))
+#					print("debug: * ({})".format(self.branches['current']))
 				else: 
 					self.branches[br[2:]]=br[2:]
-					print("debug:   ({})".format(self.branches[br[2:]]))
+#					print("debug:   ({})".format(self.branches[br[2:]]))
 		return self.branches
 
 	def addBranch(self, branch, current=False):
@@ -303,7 +305,7 @@ class Git:
 			# The second line provides the requested information
 			lines = results.splitlines()
 			self.status = lines[1]
-			print("debug: status is ({})".format(self.status))
+#			print("debug: status is ({})".format(self.status))
 		return self.status
 			
 	def checkout(self, branch=None):
@@ -331,7 +333,7 @@ class Git:
 			# 2.3 - update the object with its name
 			self.addBranch(branch, True)
 			# 2.4 - push the new branch to remote
-			print("debug: git push --set-upstream origin {}".format(branch))
+#			print("debug: git push --set-upstream origin {}".format(branch))
 			result = subprocess.run(args=['git', 'push', '--set-upstream', 'origin', branch], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			return branch
 		# 3 - branch exists, so just change to it
@@ -458,7 +460,7 @@ templateFile = root + ext
 
 if args[0].bib:			# If it's not defined here, YAML-block data is assumed
 	root,ext = os.path.splitext(args[0].bib)
-	print ('head: <' + root + '>, tail: <' + ext + '>')
+	print ('debug: bib file name: <' + root + '>, extension: <' + ext + '>')
 	if not ext:
 		ext = '.bib'
 	bibFile = root + ext
@@ -469,19 +471,22 @@ targetFile = os.path.splitext(sourceFile)[0] + '.' + format
 ###########
 # Present relevant parameter details
 ###########
-print ('base directory is    :' + baseDir)
-print ('template directory is:' + templateDir)
-print ('source file is       :' + sourceFile)
-print ('target file is       :' + targetFile)
-print ('template file is     :' + os.path.join(templateDir,templateFile))
+print ('**********************')
+print('*')
+print ('* Processing project <' + project + '>:')
+print ('* base directory is    : ' + baseDir)
+print ('* template directory is: ' + templateDir)
+print ('* source file is       : ' + sourceFile)
+print ('* target file is       : ' + targetFile)
+print ('* template file is     : ' + os.path.join(templateDir,templateFile))
 
 
 ###########
 # Check existence of main files
 ###########
 if not os.path.exists(os.path.join(baseDir, mmdDir, sourceFile)): 
-    print('source file not found', os.path.join(baseDir, mmdDir, sourceFile))
-    print('searching subfolder ...')
+    print('* Warning: source file not found', os.path.join(baseDir, mmdDir, sourceFile))
+    print('*\tsearching subfolder ...')
     # Especially with scrivener mmd projects, an additional compile folder may be introduced
     if not os.path.exists(os.path.join(baseDir, mmdDir, sourceFile, sourceFile)): 
         InputError('source file not found', os.path.join(baseDir, mmdDir, sourceFile, sourceFile))
@@ -495,47 +500,50 @@ if not os.path.exists(os.path.join(baseDir, templateDir, templateFile)): InputEr
 # Establish the branch we are working on
 ###########
 
-default_branch='master'
-if sourceFile.split('.')[-1] == 'mmd':
-	# Parse the multimarkdown file for a YAML block containing the "category: <my category>" line
-	# unless there was an argument to the doPandoc to this concern
-	# On failure, the branch name becomes 'master'
-	if args[0].checkout == default_branch:
-		# No argument given, hence parse the YAML block
-		with open(src_filename, 'r') as f:
-			line = f.readline()
-			if line.find("---") == -1: 
-				# no YAML block found
-				branch = args[0].checkout
-			else:
-				# First line is YAML block
-				for line in f:
-					if line.lower().find("category") == -1 and line.find("...") == -1: continue
-					if line.find("...") != -1: 
-						# End of YAML block found
-						branch = args[0].checkout
-						break
-					else:
-						# Line "category: <my particular category name> parameter found
-						branch = line.rsplit(sep=":", maxsplit=1)[1].strip("' \n")
-						break
+# Skip this with the undocmented command option -c 0
+if args[0] != '0':
+	default_branch='master'
+	if sourceFile.split('.')[-1] == 'mmd':
+		# Parse the multimarkdown file for a YAML block containing the "category: <my category>" line
+		# unless there was an argument to the doPandoc to this concern
+		# On failure, the branch name becomes 'master'
+		if args[0].checkout == default_branch:
+			# No argument given, hence parse the YAML block
+			with open(src_filename, 'r') as f:
+				line = f.readline()
+				if line.find("---") == -1: 
+					# no YAML block found
+					branch = args[0].checkout
+				else:
+					# First line is YAML block
+					for line in f:
+						if line.lower().find("category") == -1 and line.find("...") == -1: continue
+						if line.find("...") != -1: 
+							# End of YAML block found
+							branch = args[0].checkout
+							break
+						else:
+							# Line "category: <my particular category name> parameter found
+							branch = line.rsplit(sep=":", maxsplit=1)[1].strip("' \n")
+							break
+		else: branch = args[0].checkout
 	else: branch = args[0].checkout
-else: branch = args[0].checkout
 
 ###########
 # Consider the use of versioning, i.e., calculate potential new version. Note that the option '-l' demands '-g'
 ###########
 version = ''
 myGit = Git(project)
-print ('git branch is        :' + myGit.checkout(branch))
+print ('* git branch is        : {}'.format(myGit.checkout(branch) if args[0].checkout != 0 else '-skipped-' ))
 if gitMessage:
 	# If there is a Git message, then the default level will be 'minor'
 	level = args[0].level if args[0].level else 'minor'
-	version = myGit.incrementVersion(level, True)
+	version = myGit.incrementVersion(level=level, concat=True)
 elif (args[0].level and args[0].level == 'none') or not args[0].level:
-	# If there is NO git message, then we will generate one if the purpose is retain the same version number
+	# If there is NO git message, and also no level or 'none' level then this is an update to the text that is not worth a level increment
+	# Hence, we will generate a default git message, retain the same version number but increment the commit number
 	gitMessage='(auto message) Small textual changes only'
-	version = myGit.version(True)
+	version = myGit.incrementVersion(level=None, concat=True)
 else:
 	# If the purpose is to increment the version number, but do so WITHOUT git message, that's not good 
 	# (this should have been captured by the earlier command line option processing; this is for fail-safe only)
@@ -568,7 +576,7 @@ with cd(baseDir):
 		major = minor = None
 	myGit.commit(msg=gitMessage, major=major, minor=minor)
 
-print ('version is           :' + (version if version else ''))
+print ('* version is           : ' + (version if version else ''))
 
 ###########
 # Parse and build the arguments for pandoc
@@ -577,7 +585,7 @@ print ('version is           :' + (version if version else ''))
 pandoc_args = {}
 pandoc_args['-f'] = pandocExts
 pandoc_args['-o'] = os.path.join(targetDir,targetFile)
-print ('output to            :' + pandoc_args['-o'])
+print ('* output to            : ' + pandoc_args['-o'])
 pandoc_args['--data-dir'] = baseDir
 pandoc_args['--filter'] = 'pandoc-citeproc'				# Using an external filter, pandoc-citeproc, pandoc can automatically generate citations and a bibliography in a number of styles
 if args[0].bib:                                 		# Bibliography file given as argument that overrides YAML block
@@ -614,7 +622,7 @@ pArgs.append(src_filename)
 ###########
 
 with cd(baseDir):
-	print ('Running \n{}\n'.format(str(pArgs)))
+	print ('* Running \n{}\n'.format(str(pArgs)))
 
 	rc = subprocess.call(pArgs)                 # Do the actual pandoc operation and safe its return value
 
@@ -635,7 +643,9 @@ with cd(baseDir):
 	
 
 
-print ('Done!\n')
+print ('* Done!')
+print('*')
+print ('**********************\n')
 
 
 
