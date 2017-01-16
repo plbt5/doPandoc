@@ -500,8 +500,8 @@ if not os.path.exists(os.path.join(baseDir, templateDir, templateFile)): InputEr
 # Establish the branch we are working on
 ###########
 
-# Skip this with the undocmented command option -c 0
-if args[0] != '0':
+# Skip branching with the undocmented command option -c 0
+if args[0] != 0:
 	default_branch='master'
 	if sourceFile.split('.')[-1] == 'mmd':
 		# Parse the multimarkdown file for a YAML block containing the "category: <my category>" line

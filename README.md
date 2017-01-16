@@ -12,6 +12,8 @@ Pandoc is a very convenient text format transformation tool that can mediate bet
 Git is a very convenient version control system, that can be effectively used for documents as well, especially when you develop multiple parts of it in parallel and have it reviewed in parallel as well (branching and merging).
 Both tools have complicated command line options; doPandoc combines them and provide for several document scenarios with a relative simple command line environment. 
 
+Since pdf's are used often as a vehicle for you texts, it can be helpful to provide your proof readers with the delta view relative to the previous version of the document. One can use https://draftable.com/compare for that.
+
 ### Installation
 This is a python script, hence provide for a python-3 environment to run this in a shell. Furthermore, it optionally supports git, hence make sure git is installed if you want to use it.
 
