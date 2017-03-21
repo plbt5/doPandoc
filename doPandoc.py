@@ -1,6 +1,6 @@
-﻿#! /usr/bin/env python
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
+import codecs
 import sys
 import errno
 import subprocess
@@ -74,7 +74,7 @@ class Git:
 		# Do first commit
 		major = minor = 0
 		msg = "Project initiated in git, first commit"
-		self.commit(msg=msg, major=major, minor=minor)
+		_ = self.commit(msg=msg, major=major, minor=minor)
 		# Push to remote
 		self.push()
 		
@@ -140,34 +140,39 @@ class Git:
 		# * commit changes
 		# * tag Head with version
 		# * do not yet push to remote; this because the commit can contain errors that we do not want to push to the remote
+		# Return:
+		# * False iff staging error, branch up-to-date, tagging error or maintaining current version
+		# * True otherwise, i.e., version tag is applied successfully 
 		assert msg, "gitCommit(): Require useful message, got None"
 		
 		# Stage (add) the changes to git
 		try:
 			result = subprocess.run(args=['git', 'add', self.project+'.scriv/Files/Docs/*.rtf'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+			result = subprocess.run(args=['git', 'add', self.project+'.scriv/Files/Docs/*_synopsis.txt'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+			result = subprocess.run(args=['git', 'add', self.project+'.scriv/Files/Docs/*.comments'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			result = subprocess.run(args=['git', 'add', self.project+'.scriv/Settings/*'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			result = subprocess.run(args=['git', 'add', self.project+'.scriv/Snapshots/*'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			result = subprocess.run(args=['git', 'add', 'src/*'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			result = subprocess.run(args=['git', 'add', 'templates/*'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			result = subprocess.run(args=['git', 'add', '-u'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 		except subprocess.CalledProcessError as e: 
-			print("* git staging error: ({}) - maintaining current version ({}).".format(e.stderr, self.version(True)))
-			return
+			print("* git staging error: ({}) - maintaining current version ({}).".format(e.stderr.decode('ascii'), self.version(True)))
+			return False
 			
 		# Commit the changes to head, use commit message
 		try:
 			result = subprocess.run(args=['git', 'commit', '-m"'+msg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True)
 		except subprocess.CalledProcessError as e: 
-			if str(e.stdout).find("Your branch is up-to-date with", 0, 60):
+			if ("nothing added to commit" in str(e.stdout)) or ("Your branch is up-to-date with" in str(e.stdout)):
 				print("* Branch is up-to-date, hence maintaining current version and same commit ({}).".format(self.version(True)))
-				return
+				return False
 			else:
-				print("WARNING: git local commit error: ({})\nMaintaining current version and same commit ({}).".format(str(e.stderr), self.version(True)))
-				return
+				print("* WARNING: git local commit error: ({})\n*\tMaintaining current version and same commit ({}).".format(str(e.stderr).decode('ascii'), self.version(True)))
+				return False
 		# On use of versioning (i.e. major and minor have an actual value) and new version is eminent, tag Head with version
 		if major and minor:
-			self.tagHead(major, minor)
-		return
+			return self.tagHead(major, minor) == "v"+str(major)+"."+str(minor)
+		return True
 		
 
 	def push(self):
@@ -196,12 +201,13 @@ class Git:
 				result = subprocess.run(args=['git', 'push', '--follow-tags'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 				return True
 			except subprocess.CalledProcessError as e:
-				if str(e.stderr).find("fatal: The current branch '"+self.getBranches()['current']+"' has no upstream branch"):
+				if str(e.stderr).find("fatal: The current branch '"+self.getBranches()['current']+"' has no upstream branch") > 0:
 					result = subprocess.run(args=['git', 'push', '--set-upstream', 'origin', self.getBranches()['current']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
-				else:
+				elif str(e.stderr).find("fatal: unable to access") > 0:
 					# Push returned error: GIT CANNOT ACCESS THE REMOTE REPOSITORY, aither because it has not yet been 
 					# assume (i) we are offline, and (ii) synchronisation will happen next time
-					print("* Warning: git push error ({}).\nNot connected? Try next time".format(e.stderr))
+					print("* WARNING: {}.\nNot connected? Try next time".format(e.stderr.decode('ascii')))
+				else: raise NotImplementedError(e.stderr)
 		return False
 
 	def version(self, concat = False):
@@ -212,7 +218,7 @@ class Git:
 			root = subprocess.run(args=['git', 'describe', '--tags', '--long', '--always'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
 		except subprocess.CalledProcessError as e: 
 			# Apparently git is not used
-			print("* git not used ({})".format(e.stderr))
+			print("* git not used ({})".format(e.stderr.decode('ascii')))
 			return None if concat else None, None, None
 		# Check whether our format is being used, i.e., x.y-z. If not, git is used but without our versioning scheme
 		if '-' in str(root):
@@ -230,10 +236,14 @@ class Git:
 			return int(major), int(minor), int(commits)
 
 	def incrementVersion(self, level=None, concat = False):
-		# Just return the incremented version, based on the requested level
+		# Return V, P:
+		# * V: the incremented version, based on the requested level, either concatenated as "v<major>.<minor>-<commits>" or all three seperately
+		# * P: the previous version, concatenated as "v<major>.<minor>-<commits>"
+		# * or None on failure
 		major, minor, commits = self.version()
 		if not commits:		# Apparently no git usage yet
-			return None
+			return (None, None) if concat else (None, None, None, None)
+		prev = 'v' + str(major) + '.' + str(minor) + '-' + str(commits)
 		if level:
 			if level == 'minor': 
 				minor+=1
@@ -244,15 +254,16 @@ class Git:
 				pass
 				# print("Retaining current version ({}) but increment current commit number ({})".format(str(major) +'.'+ str(minor), str(commits)))
 			else: 
-				print('* Warning: Incorrect versioning request: can only support "none" (default), "minor" or "major", got "{}"'.format(level))
-				return None
+				print('* WARNING: Incorrect versioning request: can only support "none" (default), "minor" or "major", got "{}"'.format(level))
+				return (None, None) if concat else (None, None, None, None)
 		else:
 			#print("Retaining current version ({}) but increment current commit number ({})".format(str(major) +'.'+ str(minor), str(commits)))
 			pass
 		if concat:
-			return 'v' + str(major) + '.' + str(minor) + '-' + str(commits)
+			return 'v' + str(major) + '.' + str(minor) + '-' + str(commits), prev
 		else:
-			return int(major), int(minor), int(commits)
+			return int(major), int(minor), int(commits), prev
+
 
 	def tagHead(self, major, minor):
 		# Open shell and tag the current head
@@ -263,10 +274,10 @@ class Git:
 			result = subprocess.run(args=['git', 'tag', '-a', tag, '-m "'+tagMsg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True).stdout.decode('ascii').rstrip()
 			return result
 		except subprocess.CalledProcessError as e:
-			if str(e.stdout).find("fatal: tag '"+tag+"' already exists", 0, 40):
+			if str(e.stdout).find("fatal: tag '"+tag+"' already exists", 0, 60) > 0:
 				return tag
 			else: 
-				print("* Warning: got Git tagging error: {}".format(str(e.stderr)))
+				print("* WARNING: got Git tagging error: {}".format(str(e.stderr)))
 				return None
 				
 	def getBranches(self):
@@ -315,9 +326,10 @@ class Git:
 		if branch == self.getBranches()['current']: return branch
 		# We are on another branch, hence
 		# 1 - save the current work in this branch, i.e., stage and commit
-		self.commit(msg="saving work from current branch {} before checking out branch {}".format(self.getBranches()['current'], branch))
+		if not self.commit(msg="saving work from current branch {} before checking out branch {}".format(self.getBranches()['current'], branch)):
+			return None
 		# 2 - check whether the branch exists
-		if not branch in list(self.getBranches().values()): 
+		if not ( branch in list(self.getBranches().values()) ): 
 			# Branch doesn't exist hence create it:
 			# 2.1 - make sure to sit on the master, since we want that to be its parent
 			if self.getBranches()['current'] != "master":
@@ -336,10 +348,11 @@ class Git:
 #			print("debug: git push --set-upstream origin {}".format(branch))
 			result = subprocess.run(args=['git', 'push', '--set-upstream', 'origin', branch], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
 			return branch
-		# 3 - branch exists, so just change to it
+		# 3 - branch exists, so just change to it ...
 		result = subprocess.run(args=['git', 'checkout', branch], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True).stdout.decode('ascii').rstrip()
-		if "Switched to branch" in result.rsplit(maxsplit=1):
-			# and set the object to the correct current
+		if ("Switched to branch" in result.rsplit(maxsplit=1)) or ("Your branch is ahead of" in result):
+			# (Both responses imply that the checkout was successful, although the latter indicates that we have changes that are not pushed to the remote, yet, which is irrelevant now)
+			# ... and set the object to the correct current
 			self.setCurrentBranch(result.rsplit(maxsplit=1))
 			return result.rsplit(maxsplit=1)[1]
 		else:
@@ -357,12 +370,12 @@ default['md']   = '.mmd'
 default['mmd']  = '.mmd'
 default['-d']   = 'templates'
 default['-l']   = None
-default['-g']   = None
+default['-g']   = 'no-git'
 default['-t']   = 'pandoc-docstyle'
 default['-s']   = 'src'
 default['-r']   = 'results'
 default['-p']	= None
-default['-c']   = 'master'
+default['-c']   = 'YAML'
 
 # Configure which pandoc extensions to include in the command
 pandocExts = 'markdown_mmd'
@@ -393,7 +406,7 @@ pandocExts = pandocExts + '+link_attributes'
 
 # Get all arguments and ACK the command
 parser = argparse.ArgumentParser(
-    description='Wrapper around pandoc to spare lotsa typing!',
+    description='Wrapper around pandoc and git to spare lotsa typing!',
     epilog='''Besides the arguments above, any APPENDED arguments will be transferred 1-to-1 to pandoc, e.g., --toc. \n
             Execute this program by including the location of the program in the environment's PATH variable. \n
 			All relative directories are relative to the current working directory of the shell.\n
@@ -413,9 +426,9 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument('source', help='the name of the source file; leaving out the extension assumes .mmd')
 parser.add_argument('format', choices=['doc', 'docx', 'tex', 'pdf'], help='the target format: [doc | docx | tex | pdf]')
-parser.add_argument('-g', '--git', help='(optional) use git-versioning to commit the current text, tagged as new minor version. The text following this argument is considered the commit message (try to scale it to 50 chars). Only useful when you checked out your scrivener project from git', default=default['-g'])
-parser.add_argument('-l', '--level', choices=['none', 'minor', 'major'], help='(optional) the version level that will be incremented (requires option -g <msg>, unless "-l")', default=default['-l'])
-parser.add_argument('-c', '--checkout', help='(optional) checkout to this branch (overrides the "category" parameter in the documents YAML-block) ', default=default['-c'])
+parser.add_argument('-g', '--git', nargs='?', const=None, help='(optional) use git-versioning to commit the current text, tagged as new minor version. The text following this argument is considered the commit message (try to scale it to 50 chars). Only useful when you checked out your scrivener project from git. Without text, i.e., only "-g" implies default git message', default=default['-g'])
+parser.add_argument('-l', '--level', choices=['none', 'minor', 'major'], help='(optional) the version level that will be incremented (requires option -g <msg>)', default=default['-l'])
+parser.add_argument('-c', '--checkout', nargs='?', const=default['-c'], help='(optional, implies -g) perform a git checkout. The default branch to checkout to is specified by the "category" parameter in the documents YAML-block, but can be overridden by "-c <branch>"', default=None)
 parser.add_argument('-t', '--template', help='(optional) your style template file; leaving out the extension implies compatibility with specified target format ', default=default['-t'])
 parser.add_argument('-d', '--dDir', help='(optional) the root directory (relative to your project dir) holding the style template file ', default=default['-d'])
 parser.add_argument('-s', '--sDir', help='(optional) the root directory (relative) holding the source document files ', default=default['-s'])
@@ -485,7 +498,7 @@ print ('* template file is     : ' + os.path.join(templateDir,templateFile))
 # Check existence of main files
 ###########
 if not os.path.exists(os.path.join(baseDir, mmdDir, sourceFile)): 
-    print('* Warning: source file not found', os.path.join(baseDir, mmdDir, sourceFile))
+    print('* WARNING: source file not found', os.path.join(baseDir, mmdDir, sourceFile))
     print('*\tsearching subfolder ...')
     # Especially with scrivener mmd projects, an additional compile folder may be introduced
     if not os.path.exists(os.path.join(baseDir, mmdDir, sourceFile, sourceFile)): 
@@ -500,18 +513,18 @@ if not os.path.exists(os.path.join(baseDir, templateDir, templateFile)): InputEr
 # Establish the branch we are working on
 ###########
 
-# Skip branching with the undocmented command option -c 0
-if args[0] != 0:
-	default_branch='master'
+if args[0].checkout:
+	# Only perform a git checkout when command line option -c has been given
 	if sourceFile.split('.')[-1] == 'mmd':
 		# Parse the multimarkdown file for a YAML block containing the "category: <my category>" line
 		# unless there was an argument to the doPandoc to this concern
 		# On failure, the branch name becomes 'master'
-		if args[0].checkout == default_branch:
+		if args[0].checkout == 'YAML':
 			# No argument given, hence parse the YAML block
-			with open(src_filename, 'r') as f:
+			with codecs.open(src_filename, encoding='utf-8', mode='r') as f:
 				line = f.readline()
 				if line.find("---") == -1: 
+					# The YAML block must start with several dashes, AND, must be the first line in the file
 					# no YAML block found
 					branch = args[0].checkout
 				else:
@@ -523,8 +536,20 @@ if args[0] != 0:
 							branch = args[0].checkout
 							break
 						else:
-							# Line "category: <my particular category name> parameter found
-							branch = line.rsplit(sep=":", maxsplit=1)[1].strip("' \n")
+							# Line found, will read "category: '<my particular category name>'" 
+							# Hence: (1) remove 'category:', and 
+							# (2a) since a git branch cannot contain spaces, translate all spaces into an underscore
+							# (2b) and remove any quotes that we might we used to enclose a sentence (with spaces) as title
+							# (3) and check that the resulting name is valid for git
+#							import re
+							category = " ".join(line.rsplit(sep="category:", maxsplit=1)[1].split()).replace(" ", "_").translate({ord(c): None for c in "'\""})
+							try:
+								branch = subprocess.run(args=['git', 'check-ref-format', '--normalize', "heads/"+category], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
+							except subprocess.CalledProcessError as e:
+								print("* git error: illegal branch name ({})".format(str(e.stderr.decode('ascii'))))
+								exit(1)
+#							branch = re.sub('\s+', '_', line.rsplit(sep="category:", maxsplit=1)[1].strip())
+#							branch = branch.translate({ord(c): "_" for c in " !@#$%^&*()[]{};:,./<>?\|`'~-=+"})
 							break
 		else: branch = args[0].checkout
 	else: branch = args[0].checkout
@@ -533,50 +558,35 @@ if args[0] != 0:
 # Consider the use of versioning, i.e., calculate potential new version. Note that the option '-l' demands '-g'
 ###########
 version = ''
-myGit = Git(project)
-print ('* git branch is        : {}'.format(myGit.checkout(branch) if args[0].checkout != 0 else '-skipped-' ))
-if gitMessage:
-	# If there is a Git message, then the default level will be 'minor'
-	level = args[0].level if args[0].level else 'minor'
-	version = myGit.incrementVersion(level=level, concat=True)
-elif (args[0].level and args[0].level == 'none') or not args[0].level:
-	# If there is NO git message, and also no level or 'none' level then this is an update to the text that is not worth a level increment
-	# Hence, we will generate a default git message, retain the same version number but increment the commit number
-	gitMessage='(auto message) Small textual changes only'
-	version = myGit.incrementVersion(level=None, concat=True)
-else:
-	# If the purpose is to increment the version number, but do so WITHOUT git message, that's not good 
-	# (this should have been captured by the earlier command line option processing; this is for fail-safe only)
-	print("ERROR: Will not create a new version without a proper commit message; '-l' demands '-g <msg>'")
-	exit()
-	
-# if args[0].level and gitMessage and args[0].level in ['major', 'minor', 'none']:
-	# assert len(gitMessage) > 1, "Will not create a new version without a proper commit message; '-l' demands '-g <msg>'"
-# #	version = gitCommit(project=project, msg=gitMessage, versionLevel=args[0].level)
-# elif gitMessage:
-	# assert len(gitMessage) > 1, "Will not commit without a proper commit message; either use '-g <msg>' or don't use '-g'"
-	# # Since a git message is present, and no correct level has been given, enforce increment of minor version
-# #	version = gitCommit(project=project, msg=gitMessage, versionLevel='minor')
-	# version = incrementVersion(level='minor', True)
-# elif args[0].level == 'none':
-# #	version = None
-	# version = getVersion(True)
-# else: 
-	# # Commit the current status, but maintain the current version. This commit is distinguishable by its increment of the total commits only
-	# version = gitCommit(project=project, msg='(auto message) Small textual changes only')
-
-
-###########
-# Stage, commit and push your modifications
-###########
-with cd(baseDir):
-	if version and not version == 'v0.0-0': 
-		major, minor = version[1:].split('-')[0].split('.')
+if gitMessage != 'no-git':
+	myGit = Git(project)
+	print ('* git branch is        : {}'.format(myGit.checkout(branch) if args[0].checkout else '-skipped-' ))
+	if gitMessage:
+		# If there is a Git message, then the default level will be 'minor'
+		level = args[0].level if args[0].level else 'minor'
+		version, prev = myGit.incrementVersion(level=level, concat=True)
+	elif (args[0].level and args[0].level == 'none') or not args[0].level:
+		# If there is NO git message, and also no level or 'none' level then this is an update to the text that is not worth a level increment
+		# Hence, we will generate a default git message, retain the same version number but increment the commit number
+		gitMessage='(auto message) Small textual changes only'
+		version, prev = myGit.incrementVersion(level=None, concat=True)
 	else:
-		major = minor = None
-	myGit.commit(msg=gitMessage, major=major, minor=minor)
+		# If the purpose is to increment the version number, but do so WITHOUT git message, that's not good 
+		# (this should have been captured by the earlier command line option processing; this is for fail-safe only)
+		print("ERROR: Will not create a new version without a proper commit message; '-l' demands '-g <msg>'")
+		exit()
+	
+	###########
+	# Stage and commit your modifications
+	###########
+	with cd(baseDir):
+		if version and not version == 'v0.0-0': 
+			major, minor = version[1:].split('-')[0].split('.')
+		else:
+			major = minor = None
+		myGit.commit(msg=gitMessage, major=major, minor=minor)
 
-print ('* version is           : ' + (version if version else ''))
+	print ('* version is           : ' + ('('+prev+' ->) '+version if version else 'no-versioning'))
 
 ###########
 # Parse and build the arguments for pandoc
@@ -618,7 +628,7 @@ for val in args[1]:
 pArgs.append(src_filename)
 
 ###########
-# Run pandoc
+# Run pandoc and push the changes to the remote
 ###########
 
 with cd(baseDir):
@@ -634,7 +644,8 @@ with cd(baseDir):
 		# gitCommit(project=project, msg=gitMessage, major=major, minor=minor)
 		
 		# pandoc ran perfectly, hence no issues in its sources. Hence we can push the sources to the server, if any
-		_ = myGit.push()
+		if gitMessage != 'no-git':
+			_ = myGit.push()
 		os.startfile(os.path.join(targetDir,targetFile), 'open')
 	else: 
 		# pandoc ran into problems. Hence, no result was delivered and therefore the source documents contain errors. Do a roll-back on git to the original state.
