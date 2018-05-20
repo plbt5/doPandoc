@@ -15,6 +15,10 @@ from subprocess import call
 #		* select 'Open cmd-window here'
 #	2 - type: 'doPandoc --help' to get a full overview of its use
 #
+#	NOTE:
+#		This applies a WINDOWS platform DEPENDENT file utility, defined as is_open(filename). This is used
+#		after all processing is done and the resulting file (pdf, tex, whathaveyou) is to be opened.
+#
 #
 #	Include:
 #		templates\<arg3>.[docx | tex]		(optional) the Word or Tex templates to be used by pandoc
@@ -26,7 +30,60 @@ from subprocess import call
 #	Result: results\<arg1>.<arg2>
 #
 
+###########################################
+# File utility for WINDOWS, i.e., (only)
+# this function is platform-dependent!!
+#
+from ctypes import cdll
 
+_sopen = cdll.msvcrt._sopen
+_close = cdll.msvcrt._close
+_SH_DENYRW = 0x10
+
+def is_open(filename):
+	# Returns:
+	#	* None: if file does not exist
+	#	* False: if file exists and can be opened
+	#	* True: if file is opened by another process
+
+	f = 'results\\test.tst'
+	if os.path.exists(f):
+		try:
+		    os.remove(f)
+		except OSError as e:
+			print("Could not remove temp file " + f + ". Remove it manually before continuing!!")
+	if os.path.exists(filename):
+		try:
+			if os.rename(filename, f):# Seems to be always False
+				print ('Temporarily renamed "' + filename +'", i.e., it was not open. Now renaming it back.')
+				assert os.rename(f, filename), "Could not re-rename file " + f + " to its original name " + filename + " . Do it manually before anything else!!"
+				return False # file doesn't exist
+			else:  
+				return False # file is not used
+		except OSError as e:
+			if "WinError 32" in str(e): # File is being used by another process
+				# print ('File "' + filename +'" is in use! Close it?')
+				return True # file is already open
+			elif "WinError 183" in str(e): # Cannot create a file that already exists. However, which file? The original or the temporary one?
+				print ('Temp file "' + f +'" already exists! Remove it!!')
+				pass # We need to establish what needs to be done in this case
+			else:
+				print ('Access-error on file! Got OSError: ' + str(e))
+				pass # We need to establish what needs to be done in this case
+			return None # file doesn't exist
+	return None # file doesn't exist
+	
+#    if not os.access(filename, os.F_OK):
+#        return None # file doesn't exist
+#    h = _sopen(filename, 0, _SH_DENYRW, 0)
+#    if h == 3:
+#        _close(h)
+#        return False # file is not opened by anyone else
+#    return True # file is already open
+# END file utility for WINDOWS platform.
+############################################	
+	
+	
 def InputError(msg, expr):
     """Exception raised for errors in the input.
 
@@ -167,11 +224,16 @@ class Git:
 				print("* Branch is up-to-date, hence maintaining current version and same commit ({}).".format(self.version(True)))
 				return False
 			else:
-				print("* WARNING: git local commit error: ({})\n*\tMaintaining current version and same commit ({}).".format(str(e.stderr).decode('ascii'), self.version(True)))
+				print("* WARNING: git local commit error: ({})\n*\tMaintaining current version and same commit ({}).".format(e.stderr.decode('ascii'), self.version(True)))
 				return False
 		# On use of versioning (i.e. major and minor have an actual value) and new version is eminent, tag Head with version
 		if major and minor:
-			return self.tagHead(major, minor) == "v"+str(major)+"."+str(minor)
+			try:
+				return self.tagHead(major, minor) == "v"+str(major)+"."+str(minor)
+			except subprocess.CalledProcessError as e:
+				print("Caught an exception during tagging: watskebeurt??")
+				if not ("fatal: tag " + "'v"+str(major)+"."+str(minor) + "' already exists" in str(e.stdout)):
+					return False
 		return True
 		
 
@@ -212,18 +274,26 @@ class Git:
 
 	def version(self, concat = False):
 		# Establish tag (=version), hash and commits on top of current version
-		# return either concatenated version; or the three version parts major, minor, commits; or None if git not found 
-		# Note: when no versioning is found, our versioning scheme 'v<major>.<minor>-<commits>' will be introduced
+		# return either concatenated version; or the three version parts major, minor, commits; or None if git not found or unexpected versioning scheme
+		# Note: when no versioning is found, our versioning scheme 'v<major>.<minor>-<commits>' will be initialised
 		try:
 			root = subprocess.run(args=['git', 'describe', '--tags', '--long', '--always'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
 		except subprocess.CalledProcessError as e: 
 			# Apparently git is not used
 			print("* git not used ({})".format(e.stderr.decode('ascii')))
 			return None if concat else None, None, None
-		# Check whether our format is being used, i.e., x.y-z. If not, git is used but without our versioning scheme
-		if '-' in str(root):
-			tag, commits, hash = root.split('-')
-			major, minor = tag[1:].split('.')
+		# Check whether tags are being used. If not, git is used but without our versioning scheme
+		if root:
+			if root.count('-') == 2:
+				tag, commits, hash = root.split('-')
+				if (tag[0] == 'v') and (tag[1:].count('.') == 1):
+					major, minor = tag[1:].split('.')
+				else: 
+					print("WARNING: major.minor versioning expected, found unexpected format: {}".format(tag))
+					return None
+			else: 
+				print("WARNING: major.minor-commits versioning expected, found unexpected format: {}".format(root))
+				return None
 		else: 
 			# Enforce our versioning scheme by initializing it with v0.0-curr_commits
 			tag = 'v0.0'
@@ -241,17 +311,21 @@ class Git:
 		# * P: the previous version, concatenated as "v<major>.<minor>-<commits>"
 		# * or None on failure
 		major, minor, commits = self.version()
-		if not commits:		# Apparently no git usage yet
+		if not (major or minor or commits):		# Apparently no git usage yet
+			print("INFORM: No GIT repository found, hence no versioning applied")
 			return (None, None) if concat else (None, None, None, None)
 		prev = 'v' + str(major) + '.' + str(minor) + '-' + str(commits)
+		# Calculate anticipated new version
 		if level:
 			if level == 'minor': 
 				minor+=1
+				commits=0
 			elif level == 'major':
 				major += 1
 				minor = 0
+				commits=0
 			elif level == 'none': 
-				pass
+				commits+=1
 				# print("Retaining current version ({}) but increment current commit number ({})".format(str(major) +'.'+ str(minor), str(commits)))
 			else: 
 				print('* WARNING: Incorrect versioning request: can only support "none" (default), "minor" or "major", got "{}"'.format(level))
@@ -271,10 +345,13 @@ class Git:
 		tag = 'v' + str(major) + '.' + str(minor)
 		tagMsg = 'Version ' + tag
 		try:
-			result = subprocess.run(args=['git', 'tag', '-a', tag, '-m "'+tagMsg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True).stdout.decode('ascii').rstrip()
-			return result
+			result = subprocess.run(args=['git', 'tag', '-a', tag, '-m "'+tagMsg+'"'], stdin=None, input=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, timeout=None, check=True).stderr.decode('ascii').rstrip()
+			if result: 
+				print("INFO: taghead = {}".format(result))
+				return None
+			return tag
 		except subprocess.CalledProcessError as e:
-			if str(e.stdout).find("fatal: tag '"+tag+"' already exists", 0, 60) > 0:
+			if str(e.stderr).find("fatal: tag '"+tag+"' already exists", 0, 60) > 0:
 				return tag
 			else: 
 				print("* WARNING: got Git tagging error: {}".format(str(e.stderr)))
@@ -379,8 +456,8 @@ default['-c']   = 'YAML'
 
 # Configure which pandoc extensions to include in the command
 pandocExts = 'markdown_mmd'
-pandocExts = pandocExts + '+auto_identifiers'
-pandocExts = pandocExts + '+implicit_header_references'
+pandocExts = pandocExts + '+auto_identifiers'				# For headers without an explicitly specified identifier, a unique identifier based on the header text will be automatically assigned. 
+pandocExts = pandocExts + '+implicit_header_references'		# Pandoc behaves as if reference links have been defined for each header. 
 pandocExts = pandocExts + '+yaml_metadata_block'
 pandocExts = pandocExts + '+citations'
 pandocExts = pandocExts + '+implicit_figures'
@@ -403,6 +480,8 @@ pandocExts = pandocExts + '+startnum'
 pandocExts = pandocExts + '+fenced_code_blocks'
 pandocExts = pandocExts + '+fenced_code_attributes'
 pandocExts = pandocExts + '+link_attributes'
+pandocExts = pandocExts + '+smart'							# Produce typographically correct output, converting straight quotes to curly quotes, --- to em-dashes, -- to en-dashes, and ... to ellipses, etc.
+
 
 # Get all arguments and ACK the command
 parser = argparse.ArgumentParser(
@@ -435,11 +514,18 @@ parser.add_argument('-s', '--sDir', help='(optional) the root directory (relativ
 parser.add_argument('-r', '--rDir', help='(optional) the results directory (relative) holding the generated target file ', default=default['-r'])
 parser.add_argument('-b', '--bib', help='(optional) your bib file, overriding what has been specified in the YAML-block; leaving out the extension assumes .bib')
 parser.add_argument('-p', '--proj', help='(optional) the scrivener project(.scriv) directory holding the scrivener sources; assumes {} '.format(default['-p']), default=default['-p'])
+parser.add_argument('-v', '--version', help='(optional) when using git, it will show the latest version of the current branch of the document, or "None" if no version can be established (e.g., no git used)', action='store_true')
 args = parser.parse_known_args()
 
 ###########
 # Process the arguments and assign parameters with proper values
 ###########
+
+# Check first if only the version of the current branched document was requested
+# if args[0].version:
+#	print ('* Version of current document branch: ' + Git(None).version())
+#	exit(0)
+
 source = args[0].source
 path,srcfile = os.path.split(source)
 root,ext = os.path.splitext(srcfile)
@@ -484,9 +570,13 @@ targetFile = os.path.splitext(sourceFile)[0] + '.' + format
 ###########
 # Present relevant parameter details
 ###########
+out = subprocess.check_output(['pandoc', '-v']).decode('utf-8')		# Get pandoc version
+pandocVersion = out.splitlines()[0].split()[1]
+
 print ('**********************')
-print('*')
+print ('*')
 print ('* Processing project <' + project + '>:')
+print ('* pandoc version is    : ' + pandocVersion)
 print ('* base directory is    : ' + baseDir)
 print ('* template directory is: ' + templateDir)
 print ('* source file is       : ' + sourceFile)
@@ -584,9 +674,10 @@ if gitMessage != 'no-git':
 			major, minor = version[1:].split('-')[0].split('.')
 		else:
 			major = minor = None
-		myGit.commit(msg=gitMessage, major=major, minor=minor)
-
-	print ('* version is           : ' + ('('+prev+' ->) '+version if version else 'no-versioning'))
+		if not myGit.commit(msg=gitMessage, major=major, minor=minor):
+			# Commit not successful, hence roll-back the anticipated version to the previous version
+			version = prev
+	print ('* version is           : ' + ( version + ' (was: ' + prev + ')' if version else 'no-versioning'))
 
 ###########
 # Parse and build the arguments for pandoc
@@ -601,14 +692,15 @@ pandoc_args['--filter'] = 'pandoc-citeproc'				# Using an external filter, pando
 if args[0].bib:                                 		# Bibliography file given as argument that overrides YAML block
     pandoc_args['--bibliography'] = os.path.join(bibDir, bibFile) 
 pandoc_bools = ["--number-sections"]          			# ".. as seen in section 2.1.3" You can configure (1) which symbol to use (num-sign by default), and (2) whether to link back to the referred section, or convert the link to plain text (link by default)
-pandoc_bools.append("--top-level-division=chapter")		# Treat mmd top-level headers as chapters 
-pandoc_bools.append("--smart")							# Produce typographically correct output, converting straight quotes to curly quotes, --- to em-dashes, -- to en-dashes, and ... to ellipses, etc.
+pandoc_bools.append("--top-level-division=chapter")		# Treat mmd top-level headers as chapters
 if version:
 	pandoc_args['-M'] = 'version=' + version 			# Pass the version for this document as meta-data to be used in the template
 if (format == "docx"):
 	pandoc_args['--reference-docx'] = os.path.join(templateDir,templateFile)
 else:
 	pandoc_args['--template'] = os.path.join(templateDir,templateFile)
+	
+# pandoc_args['--latex-engine'] = 'xelatex'				# use the correct latex engine
 
 pArgs = [ 'pandoc' ]
 for key in ('-o', '-f'): 
@@ -634,6 +726,11 @@ pArgs.append(src_filename)
 with cd(baseDir):
 	print ('* Running \n{}\n'.format(str(pArgs)))
 
+	# check whether results file is still open, and notify the user
+
+	if is_open(os.path.join(targetDir,targetFile)):
+		print("WARNING: Close the target file ({}) immediately".format(targetFile))
+
 	rc = subprocess.call(pArgs)                 # Do the actual pandoc operation and safe its return value
 
 	if (rc == 0):                               # When pandoc didn't complain, we can push the current documents to git, and finally open the resulting file
@@ -646,6 +743,7 @@ with cd(baseDir):
 		# pandoc ran perfectly, hence no issues in its sources. Hence we can push the sources to the server, if any
 		if gitMessage != 'no-git':
 			_ = myGit.push()
+
 		os.startfile(os.path.join(targetDir,targetFile), 'open')
 	else: 
 		# pandoc ran into problems. Hence, no result was delivered and therefore the source documents contain errors. Do a roll-back on git to the original state.
