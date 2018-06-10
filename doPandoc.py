@@ -817,10 +817,9 @@ with cd(baseDir):
     if is_open(os.path.join(targetDir, targetFile)):
         print("WARNING: Close the target file ({}) immediately".format(targetFile))
 
-    rc = subprocess.call(pArgs)  # Do the actual pandoc operation and safe its return value
+    rc: int = subprocess.call(pArgs)  # Do the actual pandoc operation and safe its return value
 
-    if (
-            rc == 0):  # When pandoc didn't complain, we can push the current documents to git, and finally open the resulting file
+    if rc == 0:  # When pandoc didn't complain, we can push the current documents to git, and finally open the resulting file
         # if version and not version == 'v0.0-0':
         # major, minor = version[1:].split('-')[0].split('.')
         # else:
