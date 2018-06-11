@@ -1,11 +1,16 @@
 ﻿# -*- coding: utf-8 -*-
 
-import codecs
-import sys
-import errno
-import subprocess
-import os
 import argparse
+import codecs
+import errno
+import os
+import subprocess
+import sys
+###########################################
+# File utility for WINDOWS, i.e., (only)
+# this function is platform-dependent!!
+#
+from ctypes import cdll
 from subprocess import call
 
 #
@@ -29,12 +34,6 @@ from subprocess import call
 #
 #	Result: results\<arg1>.<arg2>
 #
-
-###########################################
-# File utility for WINDOWS, i.e., (only)
-# this function is platform-dependent!!
-#
-from ctypes import cdll
 
 _sopen = cdll.msvcrt._sopen
 _close = cdll.msvcrt._close
