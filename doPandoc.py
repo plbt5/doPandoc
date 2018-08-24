@@ -34,6 +34,7 @@ from subprocess import call
 #
 #	Result: results\<arg1>.<arg2>
 #
+from typing import List
 
 _sopen = cdll.msvcrt._sopen
 _close = cdll.msvcrt._close
@@ -312,6 +313,7 @@ class Git:
         # Establish tag (=version), hash and commits on top of current version
         # return either concatenated version; or the three version parts major, minor, commits; or None if git not found or unexpected versioning scheme
         # Note: when no versioning is found, our versioning scheme 'v<major>.<minor>-<commits>' will be initialised
+		import re
         try:
             root = subprocess.run(args=['git', 'describe', '--tags', '--long', '--always'], stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
@@ -319,27 +321,26 @@ class Git:
             # Apparently git is not used
             print("* git not used ({})".format(e.stderr.decode('ascii')))
             return None if concat else None, None, None
-        # Check whether tags are being used. If not, git is used but without our versioning scheme
-        if root:
+        # Check whether git's default tag-commits-hash format is being used. If not, git is used but without our tags versioning scheme
+        if root and re.match('^v\d\.\d+-\d+-g\w{7}$',root):
             if root.count('-') == 2:
                 tag, commits, hash = root.split('-')
                 if (tag[0] == 'v') and (tag[1:].count('.') == 1):
                     major, minor = tag[1:].split('.')
                 else:
-                    print("WARNING: major.minor versioning expected, found unexpected format: {}".format(tag))
+                    print("WARNING: tag expected in major.minor format (our specific versioning), found unexpected format: {}".format(tag))
                     return None
-            else:
-                print("WARNING: major.minor-commits versioning expected, found unexpected format: {}".format(root))
+			else:
+                print("WARNING: git's default tag-commits-hash format expected, found unexpected format: {}".format(root))
                 return None
         else:
             # Enforce our versioning scheme by initializing it with v0.0-curr_commits
-            tag = 'v0.0'
             major = minor = '0'
             commits = subprocess.run(args=['git', 'rev-list', 'HEAD', '--count'], stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, shell=True, check=True).stdout.decode('ascii').rstrip()
             print("* ** init versioning ({})".format(self.tagHead(major, minor)))
         if concat:
-            return tag + '-' + commits
+            return 'v' + major + '.' + minor + '-' + commits
         else:
             return int(major), int(minor), int(commits)
 
@@ -617,8 +618,9 @@ if path == os.path.join(args[0].sDir, "docs"):
 else:
     sourceDir = os.path.join(path, args[0].sDir)
 baseDir = os.getcwd()  # The shell's current working directory
+
 # Get the Scrivener project name, i.e., the name of the current working directory (no path) if no command argument has been given
-dirname = baseDir.rsplit('\\', 1)
+dirname: List[str] = baseDir.rsplit('\\', 1)
 project = dirname[1] if not args[0].proj else args[0].proj
 # Make exception for my dissertation:
 if dirname[1] == "Dissertation": project = 'DissertatieBrandt'
